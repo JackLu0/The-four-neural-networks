@@ -1,1 +1,445 @@
-code
+import warnings
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+from sklearn.metrics import roc_curve, auc, precision_score, recall_score
+from sklearn.metrics import accuracy_score
+from sklearn.metrics import confusion_matrix
+from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.metrics import f1_score
+import pandas as pd
+import tensorflow as tf
+import os
+os.environ['CUDA_VISIBLE_DEVICES']='1'
+gpu_options = tf.compat.v1.GPUOptions(per_process_gpu_memory_fraction=0.9)
+from tensorflow.python.keras.utils import np_utils
+from tensorflow.keras.callbacks import ModelCheckpoint
+warnings.filterwarnings(action='ignore')
+
+def cross_validation(df_train, labels_train, df_test, labels_test, k, model):
+    test_predict = []
+    test_predict100 = []
+    test_precision = []
+    test_recall = []
+    test_F1_Score = []
+
+    cv = StratifiedKFold(n_splits=k, shuffle=True, random_state=0)
+
+    cnt = 0
+    allacc1 = 0
+    allacc2 = 0
+    allacc3 = 0
+    label_test = labels_test
+    labels_test = np_utils.to_categorical(labels_test, num_classes=4)
+    #ResNet、GoogleNet、MCNN
+    df_test = df_test.reshape(-1, a, 1)
+
+    print("The accuracy of ten-fold cross-validation is as follows:")
+    for i, (train, test) in enumerate(cv.split(df_train, labels_train)):
+        global count
+        count += 1
+        cnt += 1
+        print('the %d iterate: ' % cnt)
+
+        label_train = labels_train[train]
+        y_train = np_utils.to_categorical(labels_train[train], num_classes=4)
+        #ResNet、GoogleNet
+        #data_train = df_train[train].reshape(-1, a, 1)
+        #MCNN、ANN
+        data_train = df_train[train]
+
+        label_val = labels_train[test]
+        labels_val = np_utils.to_categorical(labels_train[test], num_classes=4)
+        #ResNet、GoogleNet
+        #df_val = df_train[test].reshape(-1, a, 1)
+        # MCNN、ANN
+        df_val = df_train[test]
+        filepath = r'./best_model' + str(count) + '.h5'
+        checkpoint = ModelCheckpoint(filepath, monitor='val_acc', verbose=1, save_best_only='True', save_weights_only='True', mode='max', period=1)
+        #ANN、MCNN、ResNet、GoogLeNet
+        model.fit(data_train, y_train, batch_size=23, epochs=100, verbose=2, shuffle=True,
+                           validation_data=(df_val, labels_val), callbacks=[checkpoint])
+        #model.fit(df_test, labels_test, batch_size=23, validation_data=(df_val, labels_val), epochs=25)#ann use this
+        model.load_weights(r'./best_model' + str(count) + '.h5')
+
+        test_predict1 = model.predict(data_train)
+        test_predict1 = np.argmax(test_predict1, axis=1)
+        accuracy1 = accuracy_score(label_train, test_predict1)
+        print('accuracy1: ', accuracy1)
+        allacc1 = allacc1 + accuracy1
+
+        test_predict2 = model.predict(df_val)
+        test_predict2 = np.argmax(test_predict2, axis=1)
+        accuracy2 = accuracy_score(label_val, test_predict2)
+        print('accuracy2: ', accuracy2)
+        allacc2 = allacc2 + accuracy2
+
+        test_predict3 = model.predict(df_test)
+        test_predict3 = np.argmax(test_predict3, axis=1)
+        accuracy3 = accuracy_score(label_test, test_predict3)
+        print('accuracy3: ', accuracy3)
+        allacc3 = allacc3 + accuracy3
+
+        # 记录每次测试的概率值
+        predict_p = model.predict(df_test)
+        test_predict.append(predict_p)
+
+        accuracy7 = accuracy_score(label_test, test_predict3, normalize=True, sample_weight=None)
+        print("accuracy7:\n")
+        print(accuracy7)
+        test_predict100.append(accuracy7)
+
+        accuracy4 = precision_score(label_test, test_predict3, average=None)
+        test_precision.append(accuracy4)
+
+        accuracy5 = recall_score(label_test, test_predict3, average=None)
+        test_recall.append(accuracy5)
+
+        accuracy6 = f1_score(label_test, test_predict3, average=None)
+        test_F1_Score.append(accuracy6)
+
+    mean_predict = test_predict[0]
+    for i in range(1, 10):
+        mean_predict += test_predict[i]
+    mean_predict = mean_predict / 10
+
+    predict_idx = np.argmax(mean_predict, axis=1)
+
+    mean_predict1 = test_predict100[0]
+    for i in range(1, 10):
+        mean_predict1 += test_predict100[i]
+    mean_predict2 = mean_predict1 / 10
+
+    mean_precision = test_precision[0]
+    for i in range(1, 10):
+        mean_precision += test_precision[i]
+    mean_precision = mean_precision / 10
+
+    mean_recall = test_recall[0]
+    for i in range(1, 10):
+        mean_recall += test_recall[i]
+    mean_recall = mean_recall / 10
+
+    mean_F1_Score = test_F1_Score[0]
+    for i in range(1, 10):
+        mean_F1_Score += test_F1_Score[i]
+    mean_F1_Score = mean_F1_Score / 10
+
+    print('=========ten fold==========')
+    print('allacc1: ', allacc1 / 10)
+    print('allacc2: ', allacc2 / 10)
+    print('allacc3: ', allacc3 / 10)
+
+    print('classes:\t\t\t\t0\t\t\t1\t\t\t')
+    print('mean_predict2: ', mean_predict2)
+    print('mean_precision: ', mean_precision)
+    print('mean_recall: ', mean_recall)
+    print('mean_F1_Score: ', mean_F1_Score)
+
+    n_classes = 4
+
+    y_score = mean_predict
+
+    font2 = {'family': 'Times New Roman',
+             'weight': 'normal',
+             'size': 17,
+             }
+    fpr = dict()
+    tpr = dict()
+    roc_auc = dict()
+    for i in range(n_classes):
+        fpr[i], tpr[i], _ = roc_curve(labels_test[:, i], y_score[:, i])
+        roc_auc[i] = auc(fpr[i], tpr[i])
+
+    fpr["micro"], tpr["micro"], _ = roc_curve(labels_test.ravel(), y_score.ravel())
+    roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+
+    all_fpr = fpr[1]
+
+    mean_tpr = np.zeros_like(all_fpr)
+    mean_tpr += np.interp(all_fpr, fpr[1], tpr[1])
+
+    fpr["macro"] = all_fpr
+    tpr["macro"] = mean_tpr
+    roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
+    lw = 4
+    plt.figure()
+    plt.plot(fpr[1], tpr[1], color='aqua', lw=lw,
+             label='ROC curve  (AUC = {1:0.2f})'
+                   ''.format(1, roc_auc[1]))
+    plt.plot([0, 1], [0, 1], 'k--', lw=lw)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xticks(fontsize=13)
+    plt.yticks(fontsize=13)
+    plt.xlabel('False Positive Rate', font2)
+    plt.ylabel('True Positive Rate', font2)
+    plt.title(str(ModelName), font2)
+    plt.legend(loc="lower right")
+    plt.show()
+
+    font1 = {'family': 'Times New Roman',
+             'weight': 'black',
+             'size': 17,
+             }
+
+    mpl.rcParams["font.family"] = "Times New Roman"
+    mpl.rcParams["font.size"] = "17"
+    mpl.rcParams["axes.unicode_minus"] = False
+
+    y_test = np.argmax(labels_test, axis=1)
+    print(confusion_matrix(y_true=label_test, y_pred=predict_idx, labels=[0, 1, 2, 3]))
+    matrix = confusion_matrix(y_true=label_test, y_pred=predict_idx, labels=[0, 1, 2, 3])
+    plt.matshow(matrix, cmap=plt.cm.Blues, alpha=0.5)
+
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            plt.text(x=j, y=i, s=matrix[i, j], va='center', ha='center')
+    plt.xlabel('Predicted Condition', font1)
+    plt.ylabel('True Condition', font1)
+    plt.title('ANN', font1)
+    plt.savefig("ANN_dpi300.jpg", dpi=300)
+    plt.show()
+
+def ModelSelect(name):
+#===============================================ResNet==================================================================#
+    if name == 'ResNet':
+        from sklearn.model_selection import train_test_split
+        from tensorflow.keras import Input
+        from tensorflow.keras.layers import LSTM, Conv1D, MaxPooling1D, Flatten, Reshape, Embedding, GRU, \
+            UpSampling1D, \
+            ZeroPadding1D, Activation, Dropout, BatchNormalization, concatenate, LeakyReLU
+        from tensorflow.keras.layers import Dense
+        from tensorflow.keras.optimizers import Adam
+        import tensorflow.keras
+        from tensorflow.keras.models import Model
+        from sklearn.metrics import roc_curve, auc
+        import numpy as np
+        from tensorflow.python.keras.utils import np_utils
+        import matplotlib.pyplot as plt
+        adam = Adam(lr=0.000001, beta_1=0.9, beta_2=0.999, epsilon=1e-08,
+                    decay=3e-8)
+        from tensorflow.keras.layers import add
+        import pandas as pd
+        from tensorflow.keras.callbacks import ModelCheckpoint
+        def Conv1d_BN(x, nb_filter, kernel_size, strides=1, padding='same', name=None):
+            if name is not None:
+                bn_name = name + '_bn'
+                conv_name = name + '_conv'
+            else:
+                bn_name = None
+                conv_name = None
+
+            x = Conv1D(nb_filter, kernel_size, padding=padding, strides=strides, activation='relu', name=conv_name)(x)
+            x = BatchNormalization(axis=2, name=bn_name)(x)
+            return x
+
+        def Conv_Block(inpt, nb_filter, kernel_size, strides=1, with_conv_shortcut=False):
+            x = Conv1d_BN(inpt, nb_filter=nb_filter, kernel_size=kernel_size, strides=strides, padding='same')
+            x = Conv1d_BN(x, nb_filter=nb_filter, kernel_size=kernel_size, padding='same')
+            if with_conv_shortcut:
+                shortcut = Conv1d_BN(inpt, nb_filter=nb_filter, strides=strides, kernel_size=kernel_size)
+                x = add([x, shortcut])
+                return x
+            else:
+                x = add([x, inpt])
+                return x
+
+        inpt = Input(shape=(a, 1))
+        x = ZeroPadding1D(3)(inpt)
+        x = Conv1d_BN(x, nb_filter=24, kernel_size=7, strides=2, padding='valid')
+        x = Conv_Block(x, nb_filter=24, kernel_size=3)
+        x = Conv_Block(x, nb_filter=24, kernel_size=3)
+        x = Conv_Block(x, nb_filter=48, kernel_size=3, strides=2, with_conv_shortcut=True)
+        x = Conv_Block(x, nb_filter=48, kernel_size=3)
+        x = Conv_Block(x, nb_filter=64, kernel_size=3, strides=2, with_conv_shortcut=True)
+        x = Conv_Block(x, nb_filter=64, kernel_size=3)
+        x = Conv_Block(x, nb_filter=128, kernel_size=3, strides=2, with_conv_shortcut=True)
+        x = Conv_Block(x, nb_filter=128, kernel_size=3)
+        x = Flatten()(x)
+        x = Dense(4, activation='softmax')(x)
+
+        modelResNet = Model(inputs=inpt, outputs=x)
+
+        modelResNet.compile(loss='categorical_crossentropy', optimizer='adam', metrics=[
+            'accuracy'])
+        modelResNet.summary()
+
+        from tensorflow.keras.callbacks import ModelCheckpoint
+        lrreduce = tensorflow.keras.callbacks.ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=10, verbose=0,
+                                                                mode='auto', epsilon=0.0001, cooldown=0, min_lr=0)  # 回调函数
+
+#==================================================MCNN================================================================#
+    if name == 'MCNN':
+        import pandas as pd
+        from keras import Input
+        from keras.layers import LSTM, Conv1D, MaxPooling1D, Flatten, Reshape, Embedding, GRU, UpSampling1D, \
+            ZeroPadding1D, Activation, Dropout, BatchNormalization, concatenate, LeakyReLU
+        from keras.layers import Dense
+        from keras.optimizers import adam_v2
+        from keras.models import Model
+        import numpy as np
+        from keras.utils import np_utils
+        import matplotlib.pyplot as plt
+        from tensorflow.keras.callbacks import ModelCheckpoint
+        import os
+        import tensorflow as tf
+        from sklearn.model_selection import train_test_split
+        from tensorflow.keras.layers import add
+        inpt = Input(shape=(a,))
+
+        x = Reshape((-1, 1))(inpt)
+        x = BatchNormalization()(x, training=False)
+        x1 = Conv1D(filters=16, kernel_size=4, strides=1, padding='same', kernel_initializer='random_normal',
+                    bias_initializer='zeros')(x)
+        x1 = BatchNormalization()(x1, training=False)
+        x1 = LeakyReLU(alpha=0.1)(x1)
+        x2 = Conv1D(filters=16, kernel_size=8, strides=1, padding='same', kernel_initializer='random_normal')(x1)
+        x2 = BatchNormalization()(x2, training=False)
+        x2 = LeakyReLU(alpha=0.1)(x2)
+        x3 = Conv1D(filters=16, kernel_size=16, strides=1, padding='same', kernel_initializer='random_normal')(x2)
+        x3 = BatchNormalization()(x3, training=False)
+        x3 = LeakyReLU(alpha=0.1)(x3)
+        x = concatenate([x1, x2, x3])
+        x = Flatten()(x)
+        x = Dropout(0.5)(x)
+        x = Dense(256, kernel_initializer='random_normal')(x)
+        x = LeakyReLU(alpha=0.1)(x)
+        x = Dropout(0.5)(x)
+        x = Dense(4, activation='softmax', kernel_initializer='random_normal')(x)
+
+        modelMCNN = Model(inputs=[inpt], outputs=[x])
+
+        modelMCNN.compile(loss='categorical_crossentropy', optimizer='adam', metrics=[
+            'accuracy'])
+        modelMCNN.summary()
+
+#==================================================GoogLeNet=============================================================#
+    if name == 'GoogLeNet':
+        import tensorflow as tf
+        import os
+        from sklearn.model_selection import train_test_split
+        os.environ["CUDA_VISIBLE_DEVICES"] = '1'
+        config = tf.compat.v1.ConfigProto()
+        config.gpu_options.per_process_gpu_memory_fraction = 0.9
+        config.gpu_options.allow_growth = True
+        import matplotlib.pyplot as plt
+        from sklearn.metrics import roc_curve, auc
+        from tensorflow.keras.models import Sequential
+        from tensorflow.keras.layers import LSTM, Conv1D, MaxPooling1D, Flatten, Reshape, Embedding, GRU, \
+            UpSampling1D, \
+            ZeroPadding1D, Activation, Dropout, BatchNormalization, concatenate, LeakyReLU, Lambda
+        from tensorflow.keras import backend as B
+        from tensorflow.keras.layers import Dense
+        from tensorflow.keras.regularizers import l2
+        import numpy as np
+        from tensorflow.keras import Input
+        from tensorflow.keras.models import Model
+        from tensorflow.python.keras.utils import np_utils
+        import matplotlib.pyplot as plt
+        from tensorflow.keras.optimizers import Adam
+        import pandas as pd
+        from tensorflow.keras.callbacks import ModelCheckpoint
+        def Conv1d_BN(x, nb_filter, kernel_size, padding='same', strides=1, name=None):
+            if name is not None:
+                bn_name = name + '_bn'
+                conv_name = name + '_conv'
+            else:
+                bn_name = None
+                conv_name = None
+
+            x = Conv1D(nb_filter, kernel_size, padding=padding, strides=strides, activation='relu', name=conv_name)(x)
+            x = BatchNormalization(axis=2, name=bn_name)(x)
+
+            return x
+        def Inception(x, nb_filter):
+            branch1x1 = Conv1d_BN(x, nb_filter, 1, padding='same', strides=1, name=None)
+            branch3x3 = Conv1d_BN(x, nb_filter, 1, padding='same', strides=1, name=None)
+            branch3x3 = Conv1d_BN(branch3x3, nb_filter, 3, padding='same', strides=1, name=None)
+            branch5x5 = Conv1d_BN(x, nb_filter, 1, padding='same', strides=1, name=None)
+            branch5x5 = Conv1d_BN(branch5x5, nb_filter, 1, padding='same', strides=1, name=None)
+            branchpool = MaxPooling1D(pool_size=3, strides=1, padding='same')(x)
+            branchpool = Conv1d_BN(branchpool, nb_filter, 1, padding='same', strides=1, name=None)
+            x = concatenate([branch1x1, branch3x3, branch5x5, branchpool], axis=2)
+            return x
+
+        cell_size = 512
+        def LSTM_d(x):
+            x = LSTM(units=cell_size, kernel_regularizer=l2(0.005))(x)
+            return x
+
+        inpt = Input(shape=(a, 1))
+        x = Conv1d_BN(inpt, 32, 7, strides=2, padding='same')
+        x = Conv1d_BN(x, 64, 3, strides=1, padding='same')
+        x = Inception(x, 8)
+        x = Dropout(0.5)(x)
+        x = Inception(x, 16)
+        x = Lambda(lambda x: B.expand_dims(x, axis=-1))(x)
+        x = Dropout(0.5)(x)
+
+        x = Flatten()(x)
+        x = Dense(256, activation='relu')(x)
+        x = Dense(4, activation='softmax')(x)
+        adam = Adam(lr=0.01)
+        m = 23
+        modelGoogLeNet = Sequential()
+        modelGoogLeNet = Model(inpt, x, name='inception')
+        modelGoogLeNet.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])  # 可改
+        modelGoogLeNet.summary()
+
+#===================================================ANN=================================================================#
+    if name == 'ANN':
+        import numpy as np
+        import pandas as pd
+        from keras.utils import np_utils
+        from tensorflow.keras.models import Sequential
+        from tensorflow.keras.layers import Dense, Dropout
+        from keras.optimizers import adam_v2
+        from tensorflow.keras.optimizers import Adam
+        from keras.regularizers import l2
+        import matplotlib.pyplot as plt
+        modelANN = Sequential([
+            Dense(units=512, input_dim=a, bias_initializer='one', activation='tanh', kernel_regularizer=l2(0.003)),
+            Dense(units=128, bias_initializer='one', activation='tanh', kernel_regularizer=l2(0.003)),
+            Dense(units=16, bias_initializer='one', activation='tanh', kernel_regularizer=l2(0.003)),
+            Dense(units=4, bias_initializer='one', activation='softmax', kernel_regularizer=l2(0.003))
+        ])
+        adm = adam_v2.Adam(lr=0.001)
+        modelANN.compile(optimizer=adm, loss='categorical_crossentropy', metrics=['acc'])
+    if name == 'ANN':
+        model = modelANN
+    if name == 'ResNet':
+        model = modelResNet
+    if name == 'GoogLeNet':
+        model = modelGoogLeNet
+    if name == 'MCNN':
+        model = modelMCNN
+    return model
+
+if __name__ == '__main__':
+    K = 10
+    a = 20
+    global count
+    count = 0
+
+    sheet = pd.read_excel(r'the path of data', header=None)
+    data = sheet.iloc[:, 1:].values
+    label = sheet.iloc[:, 0].values
+    train_data, test_data, labels_train, labels_test = train_test_split(data, label, test_size=0.2, random_state=0, shuffle=True, stratify=None)
+    print("labels_train\n", labels_train)
+    print("labels_test\n", labels_test)
+    df_train = train_data
+
+    labels_train = labels_train.T
+    df_test = test_data
+    labels_test = labels_test.T
+    '''
+        the name of model：
+        'ANN'
+        'ResNet'
+        'GoogLeNet'
+        'MCNN'
+    '''
+    ModelName = 'ANN'
+    model = ModelSelect(ModelName)
+    cross_validation(df_train, labels_train, df_test, labels_test, K, model)
